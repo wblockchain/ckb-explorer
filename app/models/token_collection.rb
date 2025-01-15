@@ -1,14 +1,18 @@
 class TokenCollection < ApplicationRecord
+  VALID_TAGS = ["invalid", "suspicious", "out-of-length-range", "rgb++", "layer-1-asset", "layer-2-asset", "supply-limited"]
+
+  enum standard: { cota: "cota", spore: "spore", m_nft: "m_nft", nrc721: "nrc721" }
+
   has_many :items, class_name: "TokenItem", foreign_key: :collection_id
   belongs_to :creator, class_name: "Address", optional: true
   belongs_to :cell, class_name: "CellOutput", optional: true
   belongs_to :type_script, optional: true
   has_many :transfers, class_name: "TokenTransfer", through: :items
-
-  validates :sn, uniqueness: true, allow_nil: true
+  before_validation :generate_sn
+  validates :sn, uniqueness: true, presence: true
 
   def self.find_by_sn(sn)
-    c = find_by sn: sn
+    c = find_by(sn:)
     return c if c
 
     c = find_by_type_hash(sn)
@@ -24,17 +28,21 @@ class TokenCollection < ApplicationRecord
     TokenCollection.find_by! type_script_id: ts.id
   end
 
-  def as_json(options = {})
+  def as_json(_options = {})
     {
-      id: id,
-      standard: standard,
-      name: name,
-      description: description,
-      icon_url: icon_url,
+      id:,
+      standard:,
+      name:,
+      description:,
+      icon_url:,
       creator: creator&.address_hash || "",
-      items_count: items.count,
-      holders_count: items.distinct(:owner_id).count,
-      type_script: type_script&.as_json
+      items_count:,
+      holders_count:,
+      h24_ckb_transactions_count:,
+      type_script: type_script&.as_json,
+      timestamp: cell&.block_timestamp,
+      sn:,
+      tags:,
     }
   end
 
@@ -74,12 +82,12 @@ class TokenCollection < ApplicationRecord
       Udt.where(
         code_hash: ts.code_hash,
         hash_type: ts.hash_type,
-        args: ts.args
+        args: ts.args,
       ).update_all(
-        symbol: symbol,
+        symbol:,
         full_name: name,
-        description: description,
-        icon_file: icon_url
+        description:,
+        icon_file: icon_url,
       )
     end
   end
@@ -89,31 +97,103 @@ class TokenCollection < ApplicationRecord
       tc.update_info
     end
   end
+
+  # removed the wrong token collections
+  def self.remove_corrupted
+    where(standard: "nrc721").where(type_script_id: nil).or(where(creator_id: nil)).find_each do |tc|
+      begin
+        tc.update_info
+      rescue StandardError
+        nil
+      end
+
+      if tc.cell.blank?
+        tc.destroy
+      end
+
+      unless CkbUtils.is_nrc_721_factory_cell?(tc.cell.data)
+        tc.destroy
+      end
+    end
+  end
+
+  def self.fix_sn
+    TokenCollection.where(standard: %w(m_nft nrc721)).where.not(sn: nil).find_each do |tc|
+      tc2 = TokenCollection.find_by type_script_id: tc.type_script_id, sn: nil
+      next unless tc2
+
+      begin
+        tc2.items.update_all collection_id: tc.id
+      rescue StandardError
+        puts "destroy all items"
+      end
+      tc2.destroy!
+    end
+
+    TokenCollection.where(sn: nil).find_each do |tc|
+      ts = tc.type_script
+      next unless ts
+
+      ts.generate_script_hash
+      ts.save!
+      tc.sn = ts.script_hash
+      tc.save!
+    end
+  end
+
+  def generate_sn
+    # cota doesn't have type_script and cell
+    if cell && !type_script
+      self.type_script = cell.type_script
+    end
+
+    # cota doesn't have type_script
+    if type_script && !sn?
+      unless type_script.script_hash
+        type_script.generate_script_hash
+        type_script.save
+      end
+      self.sn = type_script.script_hash
+    end
+  end
+
+  def update_h24_ckb_transactions_count
+    return unless transfers.exists?
+
+    timestamp = CkbUtils.time_in_milliseconds(24.hours.ago)
+    h24_transfers = transfers.joins(:ckb_transaction).where("ckb_transactions.block_timestamp >= ?", timestamp)
+    count = h24_transfers.distinct.count(:transaction_id)
+    update(h24_ckb_transactions_count: count)
+  end
 end
 
 # == Schema Information
 #
 # Table name: token_collections
 #
-#  id             :bigint           not null, primary key
-#  standard       :string
-#  name           :string
-#  description    :text
-#  creator_id     :integer
-#  icon_url       :string
-#  items_count    :integer
-#  holders_count  :integer
-#  created_at     :datetime         not null
-#  updated_at     :datetime         not null
-#  symbol         :string
-#  cell_id        :integer
-#  verified       :boolean          default(FALSE)
-#  type_script_id :integer
-#  sn             :string
+#  id                         :bigint           not null, primary key
+#  standard                   :string
+#  name                       :string
+#  description                :text
+#  creator_id                 :integer
+#  icon_url                   :string
+#  items_count                :integer
+#  holders_count              :integer
+#  created_at                 :datetime         not null
+#  updated_at                 :datetime         not null
+#  symbol                     :string
+#  cell_id                    :integer
+#  verified                   :boolean          default(FALSE)
+#  type_script_id             :integer
+#  sn                         :string
+#  h24_ckb_transactions_count :bigint           default(0)
+#  tags                       :string           default([]), is an Array
+#  block_timestamp            :bigint
 #
 # Indexes
 #
 #  index_token_collections_on_cell_id         (cell_id)
-#  index_token_collections_on_sn              (sn) UNIQUE
+#  index_token_collections_on_sn              (sn) USING hash
 #  index_token_collections_on_type_script_id  (type_script_id)
+#  unique_sn                                  (sn) UNIQUE
 #

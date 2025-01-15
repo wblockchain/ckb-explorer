@@ -1,54 +1,29 @@
 module Api
   module V1
     class AddressTransactionsController < ApplicationController
-      before_action :validate_query_params
-      before_action :validate_pagination_params, :pagination_params
+      before_action :validate_pagination_params
 
       def show
-        @address = Address.find_address!(params[:id])
-        raise Api::V1::Exceptions::AddressNotFoundError if @address.is_a?(NullAddress)
+        expires_in 10.seconds, public: true, must_revalidate: true, stale_while_revalidate: 5.seconds
 
-        @tx_ids = AccountBook.where(address_id: @address.id).order("ckb_transaction_id" => :desc).select("ckb_transaction_id").page(@page).per(@page_size)
-        @ckb_transactions = CkbTransaction.where(id: @tx_ids.map(&:ckb_transaction_id)).select(:id, :tx_hash, :block_id, :block_number, :block_timestamp, :is_cellbase, :updated_at).order(id: :desc)
-        json =
-          Rails.cache.realize("#{@ckb_transactions.cache_key}/#{@address.query_address}", version: @ckb_transactions.cache_version) do
-            @options = FastJsonapi::PaginationMetaGenerator.new(request: request, records: @ckb_transactions, page: @page, page_size: @page_size, records_counter: @tx_ids).call
-            json_result
-          end
-
-        render json: json
+        json = Addresses::CkbTransactions.run!(
+          { request:,
+            key: params[:id], sort: params[:sort],
+            page: params[:page], page_size: params[:page_size] },
+        )
+        render json:
       end
 
-      private
+      def download_csv
+        address = Addresses::Explore.run!(key: params[:id])
+        raise Api::V1::Exceptions::AddressNotFoundError if address.is_a?(NullAddress)
 
-      def validate_query_params
-        validator = Validations::Address.new(params)
+        args = params.permit(:id, :start_date, :end_date, :start_number, :end_number, address_transaction: {}).
+          merge(address_id: address.map(&:id))
+        file = CsvExportable::ExportAddressTransactionsJob.perform_now(args.to_h)
 
-        if validator.invalid?
-          errors = validator.error_object[:errors]
-          status = validator.error_object[:status]
-
-          render json: errors, status: status
-        end
-      end
-
-      def pagination_params
-        @page = params[:page] || 1
-        @page_size = params[:page_size] || CkbTransaction.default_per_page
-      end
-
-      def json_result
-        ckb_transaction_serializer = CkbTransactionsSerializer.new(@ckb_transactions, @options.merge(params: { previews: true, address: @address }))
-
-        if QueryKeyUtils.valid_address?(params[:id])
-          if @address.address_hash == @address.query_address
-            ckb_transaction_serializer.serialized_json
-          else
-            ckb_transaction_serializer.serialized_json.gsub(@address.address_hash, @address.query_address)
-          end
-        else
-          ckb_transaction_serializer.serialized_json
-        end
+        send_data file, type: "text/csv; charset=utf-8; header=present",
+                        disposition: "attachment;filename=ckb_transactions.csv"
       end
     end
   end

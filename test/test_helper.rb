@@ -1,4 +1,8 @@
 require "simplecov"
+require "simplecov-cobertura"
+if ENV["CI"]
+  SimpleCov.formatter = SimpleCov::Formatter::CoberturaFormatter
+end
 SimpleCov.start "rails" do
   add_filter "/app/channels/"
   add_filter "/app/jobs/"
@@ -9,6 +13,7 @@ SimpleCov.start "rails" do
   add_filter "/lib/ckb_statistic_info_chart_data_updater.rb"
 end
 require "database_cleaner"
+require "database_cleaner/active_record"
 require "minitest/reporters"
 require "mocha/minitest"
 require "sidekiq/testing"
@@ -25,8 +30,10 @@ HAS_UNCLES_BLOCK_NUMBER = 13
 VCR.configure do |config|
   config.cassette_library_dir = "vcr_fixtures/vcr_cassettes"
   config.hook_into :webmock
-  config.default_cassette_options[:match_requests_on] = [:method, :path, :body]
+  config.default_cassette_options[:match_requests_on] = %i[method path body]
 end
+DatabaseCleaner.clean_with :truncation
+# DatabaseCleaner.strategy = :truncation
 DatabaseCleaner.strategy = :transaction
 
 Shoulda::Matchers.configure do |config|
@@ -38,25 +45,21 @@ Shoulda::Matchers.configure do |config|
   end
 end
 
-if ENV["CI"] == "true"
-  require "codecov"
-  SimpleCov.formatter = SimpleCov::Formatter::Codecov
-end
-
 def prepare_node_data(node_tip_block_number = 30)
   Sidekiq::Testing.inline!
   GenerateStatisticsDataWorker.any_instance.stubs(:perform).returns(true)
+  BitcoinTransactionDetectWorker.any_instance.stubs(:perform).returns(true)
   CkbSync::Api.any_instance.stubs(:get_tip_block_number).returns(node_tip_block_number + 1)
   CkbSync::Api.any_instance.stubs(:get_epoch_by_number).returns(
     CKB::Types::Epoch.new(
       compact_target: "0x1000",
-      length: "0x07d0",
+      length: "0x03e8",
       number: "0x0",
-      start_number: "0x0"
-    )
+      start_number: "0x0",
+    ),
   )
   local_tip_block_number = 0
-  ((local_tip_block_number)..node_tip_block_number).each do |number|
+  (local_tip_block_number..node_tip_block_number).each do |number|
     VCR.use_cassette("genesis_block") do
       VCR.use_cassette("blocks/#{number}", record: :new_episodes) do
         node_block = CkbSync::Api.instance.get_block_by_number(number)
@@ -65,8 +68,13 @@ def prepare_node_data(node_tip_block_number = 30)
             primary: "0x174876e800",
             secondary: "0xa",
             committed: "0xa",
-            proposal: "0xa"
-          ))
+            proposal: "0xa",
+          )),
+        )
+        CkbSync::Api.any_instance.stubs(:get_block_cycles).returns(
+          [
+            "0x100", "0x200", "0x300", "0x400", "0x500", "0x600", "0x700", "0x800", "0x900"
+          ],
         )
         CkbSync::NewNodeDataProcessor.new.process_block(node_block)
         CkbSync::Api.any_instance.stubs(:get_cellbase_output_capacity_details).returns(
@@ -75,8 +83,8 @@ def prepare_node_data(node_tip_block_number = 30)
             primary: "0x174876e800",
             secondary: "0xa",
             tx_fee: "0xa",
-            proposal_reward: "0xa"
-          )
+            proposal_reward: "0xa",
+          ),
         )
       end
     end
@@ -89,7 +97,7 @@ def unpack_attribute(obj, attribute_name)
 
   attribute_before_type_cast = obj.attributes_before_type_cast[attribute_name]
   unescapted_attribute = ActiveRecord::Base.connection.unescape_bytea(attribute_before_type_cast)
-  "#{ENV['DEFAULT_HASH_PREFIX']}#{unescapted_attribute.unpack1('H*')}" if unescapted_attribute.present?
+  "#{Settings.default_hash_prefix}#{unescapted_attribute.unpack1('H*')}" if unescapted_attribute.present?
 end
 
 def unpack_array_attribute(obj, attribute_name, array_size, hash_length)
@@ -99,7 +107,7 @@ def unpack_array_attribute(obj, attribute_name, array_size, hash_length)
   value = ActiveRecord::Base.connection.unescape_bytea(value)
   template = Array.new(array_size || 0).reduce("") { |memo, _item| "#{memo}H#{hash_length}" }
   template = "S!#{template}"
-  value.unpack(template.to_s).drop(1).map { |hash| "#{ENV['DEFAULT_HASH_PREFIX']}#{hash}" }.reject(&:blank?)
+  value.unpack(template.to_s).drop(1).map { |hash| "#{Settings.default_hash_prefix}#{hash}" }.reject(&:blank?)
 end
 
 def format_node_block(node_block)
@@ -111,11 +119,14 @@ def format_node_block(node_block)
   header["nonce"] = header["nonce"].hex
   header["epoch"] = "0x#{CKB::Utils.to_hex(header['epoch']).split(//).last(6).join('')}".hex
   proposals = node_block["proposals"].presence
-  header.merge({ proposals: proposals }.deep_stringify_keys)
+  header.merge({ proposals: }.deep_stringify_keys)
 end
 
 def format_node_block_commit_transaction(commit_transaction)
-  tx = commit_transaction.instance_values.reject { |key, _value| key.in?(%w(inputs outputs outputs_data)) }
+  tx =
+    commit_transaction.instance_values.reject do |key, _value|
+      key.in?(%w(inputs outputs outputs_data))
+    end
   tx["witnesses"] = JSON.parse(tx["witnesses"].to_json)
 
   tx
@@ -138,7 +149,7 @@ def build_display_input_from_node_input(input)
   cell = input["previous_output"]["cell"]
 
   if cell.blank?
-    { id: nil, from_cellbase: true, capacity: ENV["INITIAL_BLOCK_REWARD"].to_i, address_hash: nil }.stringify_keys
+    { id: nil, from_cellbase: true, capacity: Settings.initial_block_reward.to_i, address_hash: nil }.stringify_keys
   else
     VCR.use_cassette("blocks/9") do
       previous_transaction_hash = cell["tx_hash"]
@@ -165,7 +176,7 @@ def fake_node_block(block_hash = DEFAULT_NODE_BLOCK_HASH, number = "0xc")
       "timestamp": "0x16aa12ea9e3",
       "transactions_root": "0xefb03572314fbb45aba0ef889373d3181117b253664de4dca0934e453b1e6bf3",
       "extra_hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
-      "version": "0x0"
+      "version": "0x0",
     },
     "proposals": [],
     "transactions":
@@ -177,9 +188,12 @@ def fake_node_block(block_hash = DEFAULT_NODE_BLOCK_HASH, number = "0xc")
           "hash": "0xefb03572314fbb45aba0ef889373d3181117b253664de4dca0934e453b1e6bf3",
           "inputs": [
             {
-              "previous_output": { "tx_hash": "0x0000000000000000000000000000000000000000000000000000000000000000", "index": "0x0" },
-              "since": "0x0"
-            }
+              "previous_output": {
+                "tx_hash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+                "index": "0x0",
+              },
+              "since": "0x0",
+            },
           ],
           "outputs": [
             {
@@ -188,31 +202,31 @@ def fake_node_block(block_hash = DEFAULT_NODE_BLOCK_HASH, number = "0xc")
               "lock": {
                 "args": "0xb2e61ff569acf041b3c2c17724e2379c581eeac3",
                 "code_hash": "0x1d107ddec56ec77b79c41cd10b35a3b47434c93a604ecb8e8e73e7372fe1a794",
-                "hash_type": "data"
+                "hash_type": "data",
               },
-              "type": nil
-            }
+              "type": nil,
+            },
           ],
           "version": "0x0",
           "witnesses": [
-            "0x5d0000000c00000055000000490000001000000030000000310000009bd7e06f3ecf4be0f2fcd2188b23f1b9fcc88e5d4b65a8637b17723bbda3cce801140000003954acece65096bfa81258983ddb83915fc56bd804000000123456780000000000000000"
-          ]
+            "0x5d0000000c00000055000000490000001000000030000000310000009bd7e06f3ecf4be0f2fcd2188b23f1b9fcc88e5d4b65a8637b17723bbda3cce801140000003954acece65096bfa81258983ddb83915fc56bd804000000123456780000000000000000",
+          ],
         },
         {
           "header_deps": [],
           "cell_deps": [],
           "outputs_data": [
-            "0x"
+            "0x",
           ],
           "hash": "0xefb03572314fbb45aba0ef889373d3181117b253664de4dca0934e453b1e6bf2",
           "inputs": [
             {
               "previous_output": {
                 "tx_hash": "0x598315db9c7ba144cca74d2e9122ac9b3a3da1641b2975ae321d91ec34f1c0e3",
-                "index": "0x2"
+                "index": "0x2",
               },
-              "since": "0x0"
-            }
+              "since": "0x0",
+            },
           ],
           "outputs": [
             {
@@ -221,31 +235,31 @@ def fake_node_block(block_hash = DEFAULT_NODE_BLOCK_HASH, number = "0xc")
               "lock": {
                 "args": "0xb2e61ff569acf041b3c2c17724e2379c581eeac3",
                 "code_hash": "0x1d107ddec56ec77b79c41cd10b35a3b47434c93a604ecb8e8e73e7372fe1a794",
-                "hash_type": "data"
+                "hash_type": "data",
               },
-              "type": nil
-            }
+              "type": nil,
+            },
           ],
           "version": "0x0",
           "witnesses": [
-            "0x5d0000000c00000055000000490000001000000030000000310000009bd7e06f3ecf4be0f2fcd2188b23f1b9fcc88e5d4b65a8637b17723bbda3cce801140000003954acece65096bfa81258983ddb83915fc56bd804000000123456780000000000000000"
-          ]
+            "0x5d0000000c00000055000000490000001000000030000000310000009bd7e06f3ecf4be0f2fcd2188b23f1b9fcc88e5d4b65a8637b17723bbda3cce801140000003954acece65096bfa81258983ddb83915fc56bd804000000123456780000000000000000",
+          ],
         },
         {
           "header_deps": [],
           "cell_deps": [],
           "outputs_data": [
-            "0x"
+            "0x",
           ],
           "hash": "0xefb03572314fbb45aba0ef889373d3181117b253664de4dca0934e453b1e6b23",
           "inputs": [
             {
               "previous_output": {
                 "tx_hash": "0x498315db9c7ba144cca74d2e9122ac9b3a3da1641b2975ae321d91ec34f1c0e3",
-                "index": "0x1"
+                "index": "0x1",
               },
-              "since": "0x0"
-            }
+              "since": "0x0",
+            },
           ],
           "outputs": [
             {
@@ -254,18 +268,19 @@ def fake_node_block(block_hash = DEFAULT_NODE_BLOCK_HASH, number = "0xc")
               "lock": {
                 "args": "0xb2e61ff569acf041b3c2c17724e2379c581eeac3",
                 "code_hash": "0x1d107ddec56ec77b79c41cd10b35a3b47434c93a604ecb8e8e73e7372fe1a794",
-                "hash_type": "data"
+                "hash_type": "data",
               },
-              "type": nil
-            }
+              "type": nil,
+            },
           ],
           "version": "0x0",
           "witnesses": [
-            "0x"
-          ]
-        }
+            "0x",
+          ],
+        },
       ],
-    "uncles": [] }
+    "uncles": [],
+  }
   CKB::Types::Block.from_h(json_block.deep_symbolize_keys)
 end
 
@@ -284,16 +299,16 @@ def prepare_api_wrapper
       primary: "0x174876e800",
       secondary: "0x0",
       tx_fee: "0x0",
-      proposal_reward: "0x0"
-    )
+      proposal_reward: "0x0",
+    ),
   )
   CkbSync::Api.any_instance.stubs(:get_block_economic_state).returns(
     OpenStruct.new(miner_reward: CKB::Types::MinerReward.new(
       primary: "0x174876e800",
       secondary: "0xa",
       committed: "0xa",
-      proposal: "0xa"
-    ))
+      proposal: "0xa",
+    )),
   )
   VCR.use_cassette("genesis_block") do
     CkbSync::Api.instance
@@ -305,13 +320,13 @@ def previous_cell_output(previous_output)
 
   tx_hash = previous_output["tx_hash"]
   output_index = previous_output["index"].to_i
-  previous_transaction = CkbTransaction.find_by!(tx_hash: tx_hash)
+  previous_transaction = CkbTransaction.find_by!(tx_hash:)
   previous_transaction.cell_outputs.order(:id)[output_index]
 end
 
 def create_cell_output(trait_type: :with_full_transaction, status: "live")
   block = create(:block, :with_block_hash)
-  create(:cell_output, trait_type, block: block, status: status)
+  create(:cell_output, trait_type, block:, status:)
 end
 
 def generate_miner_ranking_related_data(block_timestamp = 1560578500000)
@@ -319,23 +334,43 @@ def generate_miner_ranking_related_data(block_timestamp = 1560578500000)
   cellbases = []
   blocks.each_with_index do |block, index|
     block.update(number: block.number + index)
-    cellbase = block.ckb_transactions.create(is_cellbase: true, block_timestamp: block_timestamp, block_number: 10)
+    cellbase = block.ckb_transactions.create(is_cellbase: true, block_timestamp:, block_number: 10)
     cellbases << cellbase
   end
   cellbases_part1 = cellbases[0..1]
   cellbases_part2 = cellbases[2..8]
   cellbases_part3 = cellbases[9..-1]
   address1 = create(:address, :with_lock_script)
-  cellbases_part1.map { |cellbase| cellbase.cell_outputs.create!(block: cellbase.block, capacity: 10**8, address: address1, generated_by: cellbase) }
-  address1.ckb_transactions << cellbases_part1
+  cellbases_part1.map do |cellbase|
+    cellbase.cell_outputs.create!(block: cellbase.block, capacity: 10**8, address: address1,
+                                  lock_script: address1.lock_script)
+  end
+  # address1.ckb_transactions << cellbases_part1
+  AccountBook.insert_all(cellbases_part1.map { |c| { address_id: address1.id, ckb_transaction_id: c.id } })
   address2 = create(:address, :with_lock_script)
-  cellbases_part2.map { |cellbase| cellbase.cell_outputs.create!(block: cellbase.block, capacity: 10**8, address: address2, generated_by: cellbase) }
-  address2.ckb_transactions << cellbases_part2
+  cellbases_part2.map do |cellbase|
+    cellbase.cell_outputs.create!(block: cellbase.block, capacity: 10**8, address: address2,
+                                  lock_script: address2.lock_script)
+  end
+  # address2.ckb_transactions << cellbases_part2
+  AccountBook.insert_all(
+    cellbases_part2.map do |c|
+      { address_id: address2.id, ckb_transaction_id: c.id }
+    end,
+  )
   address3 = create(:address, :with_lock_script)
-  cellbases_part3.map { |cellbase| cellbase.cell_outputs.create!(block: cellbase.block, capacity: 10**8, address: address3, generated_by: cellbase) }
-  address3.ckb_transactions << cellbases_part3
+  cellbases_part3.map do |cellbase|
+    cellbase.cell_outputs.create!(block: cellbase.block, capacity: 10**8, address: address3,
+                                  lock_script: address3.lock_script)
+  end
+  # address3.ckb_transactions << cellbases_part3
+  AccountBook.insert_all(
+    cellbases_part3.map do |c|
+      { address_id: address3.id, ckb_transaction_id: c.id }
+    end,
+  )
 
-  return address1, address2, address3
+  [address1, address2, address3]
 end
 
 def expected_ranking(address1, address2, address3)
@@ -346,22 +381,22 @@ def expected_ranking(address1, address2, address3)
   address2_blocks = Block.where(id: address2_block_ids)
   address3_blocks = Block.where(id: address3_block_ids)
   address1_base_rewards =
-    address1_blocks.map { |block|
+    address1_blocks.map do |block|
       base_reward(block.number, block.epoch)
-    }.reduce(0, &:+)
+    end.reduce(0, &:+)
   address2_base_rewards =
-    address2_blocks.map { |block|
+    address2_blocks.map do |block|
       base_reward(block.number, block.epoch)
-    }.reduce(0, &:+)
+    end.reduce(0, &:+)
   address3_base_rewards =
-    address3_blocks.map { |block|
+    address3_blocks.map do |block|
       base_reward(block.number, block.epoch)
-    }.reduce(0, &:+)
+    end.reduce(0, &:+)
 
   [
     { address_hash: address2.address_hash, lock_hash: address2.lock_hash, total_base_reward: address2_base_rewards },
     { address_hash: address1.address_hash, lock_hash: address1.lock_hash, total_base_reward: address1_base_rewards },
-    { address_hash: address3.address_hash, lock_hash: address3.lock_hash, total_base_reward: address3_base_rewards }
+    { address_hash: address3.address_hash, lock_hash: address3.lock_hash, total_base_reward: address3_base_rewards },
   ]
 end
 
@@ -371,11 +406,30 @@ def fake_dao_deposit_transaction(dao_cell_count, address)
   address.update(dao_transactions_count: dao_cell_count)
   dao_cell_count.times do |number|
     if number % 2 == 0
-      ckb_transaction1 = create(:ckb_transaction, tx_hash: "0x#{SecureRandom.hex(32)}", block: block, address: address, dao_address_ids: [address.id], contained_address_ids: [address.id], tags: ["dao"])
-      create(:cell_output, ckb_transaction: ckb_transaction1, cell_index: number, tx_hash: "0x498315db9c7ba144cca74d2e9122ac9b3a3da1641b2975ae321d91ec34f1c0e3", generated_by: ckb_transaction1, block: block, capacity: 10**8 * 1000, cell_type: "nervos_dao_deposit", address: address)
+      ckb_transaction1 = create(:ckb_transaction,
+                                tx_hash: "0x#{SecureRandom.hex(32)}",
+                                block:,
+                                address:,
+                                contained_address_ids: [address.id],
+                                tags: ["dao"])
+      create(:dao_event, ckb_transaction_id: ckb_transaction1.id, address_id: address.id, event_type: "deposit_to_dao")
+      create(:cell_output, ckb_transaction: ckb_transaction1, cell_index: number,
+                           tx_hash: "0x498315db9c7ba144cca74d2e9122ac9b3a3da1641b2975ae321d91ec34f1c0e3", block:, capacity: 10**8 * 1000, cell_type: "nervos_dao_deposit", address:)
     else
-      ckb_transaction2 = create(:ckb_transaction, tx_hash: "0x#{SecureRandom.hex(32)}", block: block, address: address, dao_address_ids: [address.id], contained_address_ids: [address.id], tags: ["dao"])
-      create(:cell_output, ckb_transaction: ckb_transaction2, cell_index: number, tx_hash: "0x498315db9c7ba144cca74d2e9122ac9b3a3da1641b2975ae321d91ec34f1c0e3", generated_by: ckb_transaction2, block: block, capacity: 10**8 * 1000, cell_type: "nervos_dao_deposit", address: address)
+      ckb_transaction2 = create(:ckb_transaction,
+                                tx_hash: "0x#{SecureRandom.hex(32)}",
+                                block:, address:,
+                                contained_address_ids: [address.id],
+                                tags: ["dao"])
+      create(:dao_event, ckb_transaction_id: ckb_transaction2.id, address_id: address.id, event_type: "deposit_to_dao")
+      create(:cell_output,
+             ckb_transaction: ckb_transaction2,
+             cell_index: number,
+             tx_hash: "0x498315db9c7ba144cca74d2e9122ac9b3a3da1641b2975ae321d91ec34f1c0e3",
+             block:,
+             capacity: 10**8 * 1000,
+             cell_type: "nervos_dao_deposit",
+             address:)
     end
   end
 end
@@ -396,6 +450,12 @@ module RequestHelpers
     params[:headers] = { "Content-Type": "application/vnd.api+json", "Accept": "application/vnd.api+json" }
     post uri, as: :json, **params
   end
+
+  def valid_put(uri, **params)
+    params[:params] ||= {}
+    params[:headers] = { "Content-Type": "application/vnd.api+json", "Accept": "application/vnd.api+json" }
+    put uri, as: :json, **params
+  end
 end
 
 module ActiveSupport
@@ -407,13 +467,13 @@ module ActiveSupport
 
     # Add more helper methods to be used by all tests here...
     def before_setup
-      super
       DatabaseCleaner.start
-
+      super
       CkbSync::NewNodeDataProcessor.any_instance.stubs(:get_median_timestamp).returns(1573852190812)
     end
 
     def after_setup
+      super
       prepare_api_wrapper
       CKB::Types::Block.any_instance.stubs(:serialized_size_without_uncle_proposals).returns(400)
     end

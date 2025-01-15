@@ -6,6 +6,12 @@ class UncleBlockTest < ActiveSupport::TestCase
     create(:table_record_count, :ckb_transactions_counter)
     CkbSync::Api.any_instance.stubs(:get_blockchain_info).returns(OpenStruct.new(chain: "ckb_testnet"))
     GenerateStatisticsDataWorker.any_instance.stubs(:perform).returns(true)
+    BitcoinTransactionDetectWorker.any_instance.stubs(:perform).returns(true)
+    CkbSync::Api.any_instance.stubs(:get_block_cycles).returns(
+      [
+        "0x100", "0x200", "0x300", "0x400", "0x500", "0x600", "0x700", "0x800", "0x900"
+      ],
+    )
   end
 
   context "associations" do
@@ -25,7 +31,7 @@ class UncleBlockTest < ActiveSupport::TestCase
 
   test "#block_hash should decodes packed string" do
     block = create(:block)
-    uncle_block = create(:uncle_block, block: block)
+    uncle_block = create(:uncle_block, block:)
     block_hash = uncle_block.block_hash
 
     assert_equal unpack_attribute(uncle_block, "block_hash"), block_hash
@@ -33,7 +39,7 @@ class UncleBlockTest < ActiveSupport::TestCase
 
   test "#parent_hash should decodes packed string" do
     block = create(:block)
-    uncle_block = create(:uncle_block, block: block)
+    uncle_block = create(:uncle_block, block:)
     parent_hash = uncle_block.parent_hash
 
     assert_equal unpack_attribute(uncle_block, "parent_hash"), parent_hash
@@ -41,7 +47,7 @@ class UncleBlockTest < ActiveSupport::TestCase
 
   test "#transactions_root should decodes packed string" do
     block = create(:block)
-    uncle_block = create(:uncle_block, block: block)
+    uncle_block = create(:uncle_block, block:)
     transactions_root = uncle_block.transactions_root
 
     assert_equal unpack_attribute(uncle_block, "transactions_root"), transactions_root
@@ -49,7 +55,7 @@ class UncleBlockTest < ActiveSupport::TestCase
 
   test "#proposals_hash should decodes packed string" do
     block = create(:block)
-    uncle_block = create(:uncle_block, block: block)
+    uncle_block = create(:uncle_block, block:)
     proposals_hash = uncle_block.proposals_hash
 
     assert_equal unpack_attribute(uncle_block, "proposals_hash"), proposals_hash
@@ -57,7 +63,7 @@ class UncleBlockTest < ActiveSupport::TestCase
 
   test "#extra_hash should decodes packed string" do
     block = create(:block)
-    uncle_block = create(:uncle_block, block: block)
+    uncle_block = create(:uncle_block, block:)
     extra_hash = uncle_block.extra_hash
 
     assert_equal unpack_attribute(uncle_block, "extra_hash"), extra_hash
@@ -69,8 +75,8 @@ class UncleBlockTest < ActiveSupport::TestCase
         compact_target: "0x1000",
         length: "0x07d0",
         number: "0x0",
-        start_number: "0x0"
-      )
+        start_number: "0x0",
+      ),
     )
     VCR.use_cassette("blocks/#{HAS_UNCLES_BLOCK_NUMBER}") do
       node_block = CkbSync::Api.instance.get_block_by_number(HAS_UNCLES_BLOCK_NUMBER)
@@ -83,13 +89,13 @@ class UncleBlockTest < ActiveSupport::TestCase
       uncle_block = block.uncle_blocks.first
       proposals = uncle_block.proposals
 
-      assert_equal unpack_array_attribute(uncle_block, "proposals", uncle_block.proposals_count, ENV["DEFAULT_SHORT_HASH_LENGTH"]), proposals
+      assert_equal unpack_array_attribute(uncle_block, "proposals", uncle_block.proposals_count, Settings.default_short_hash_length), proposals
     end
   end
 
   test "#proposals should return super when proposal transactions is empty" do
     block = create(:block)
-    uncle_block = create(:uncle_block, block: block)
+    uncle_block = create(:uncle_block, block:)
     uncle_block.update(proposals: [])
     proposals = uncle_block.proposals
 
@@ -98,11 +104,11 @@ class UncleBlockTest < ActiveSupport::TestCase
 
   test "#proposals= should encode proposals" do
     block = create(:block)
-    uncle_block = create(:uncle_block, block: block)
+    uncle_block = create(:uncle_block, block:)
     uncle_block.proposals = ["0xeab419c632", "0xeab410c634"]
     uncle_block.proposals_count = uncle_block.proposals.size
     uncle_block.save
 
-    assert_equal unpack_array_attribute(uncle_block, "proposals", uncle_block.proposals_count, ENV["DEFAULT_SHORT_HASH_LENGTH"]), uncle_block.proposals
+    assert_equal unpack_array_attribute(uncle_block, "proposals", uncle_block.proposals_count, Settings.default_short_hash_length), uncle_block.proposals
   end
 end

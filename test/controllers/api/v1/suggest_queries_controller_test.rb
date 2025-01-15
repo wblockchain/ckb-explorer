@@ -11,7 +11,7 @@ module Api
       end
 
       test "should set right content type when call show" do
-        valid_get api_v1_suggest_queries_url("0x3b238b3326d10ec000417b68bc715f17e86293d6cdbcb3fd8a628ad4a0b756f6")
+        valid_get api_v1_suggest_queries_url, params: { q: "0x3b238b3326d10ec000417b68bc715f17e86293d6cdbcb3fd8a628ad4a0b756f6" }
 
         assert_equal "application/vnd.api+json", response.media_type
       end
@@ -46,43 +46,8 @@ module Api
         assert_equal response_json, response.body
       end
 
-      test "should response with error object when query key is neither integer nor hex or address" do
-        error_object = Api::V1::Exceptions::SuggestQueryKeyInvalidError.new
-        response_json = RequestErrorSerializer.new([error_object], message: error_object.title).serialized_json
-
-        valid_get api_v1_suggest_queries_url, params: { q: "0x3b238b3326d10ec000417b6&^&bc715f17e86293d6cdbcb3fd8a628ad4a0b756f6" }
-
-        assert_equal response_json, response.body
-      end
-
-      test "should response with error object when query key is not a hex start with 0x and not a address" do
-        error_object = Api::V1::Exceptions::SuggestQueryKeyInvalidError.new
-        response_json = RequestErrorSerializer.new([error_object], message: error_object.title).serialized_json
-
-        valid_get api_v1_suggest_queries_url, params: { q: "3b238b3326d10ec000417b68bc715f17e86293d6cdbcb3fd8a628ad4a0b756f6" }
-
-        assert_equal response_json, response.body
-      end
-
-      test "should return error object when query key is a hex start with 0x but the length is wrong" do
-        error_object = Api::V1::Exceptions::SuggestQueryKeyInvalidError.new
-        response_json = RequestErrorSerializer.new([error_object], message: error_object.title).serialized_json
-
-        valid_get api_v1_suggest_queries_url, params: { q: "0x3b238b3326d10ec0004" }
-
-        assert_equal response_json, response.body
-      end
-
-      test "should return error object when query key is not a address" do
-        error_object = Api::V1::Exceptions::SuggestQueryKeyInvalidError.new
-        response_json = RequestErrorSerializer.new([error_object], message: error_object.title).serialized_json
-
-        valid_get api_v1_suggest_queries_url, params: { q: "ckc2q9gry5zgwayze0rtl8g0m8lgtx0cj35hmajzz2r9e6rtnt" }
-
-        assert_equal response_json, response.body
-      end
-
       test "should return a block when query key is a exist block height" do
+        Block.delete_all
         block = create(:block)
         response_json = BlockSerializer.new(block).serialized_json
 
@@ -91,6 +56,7 @@ module Api
       end
 
       test "should return a block when query key is a exist block hash" do
+        Block.delete_all
         block = create(:block)
         response_json = BlockSerializer.new(block).serialized_json
 
@@ -119,7 +85,7 @@ module Api
       end
 
       test "should return error object when no records found by a integer query key" do
-        error_object = Api::V1::Exceptions::BlockNotFoundError.new
+        error_object = Api::V1::Exceptions::SuggestQueryResultNotFoundError.new
         response_json = RequestErrorSerializer.new([error_object], message: error_object.title).serialized_json
 
         valid_get api_v1_suggest_queries_url, params: { q: 1 }
@@ -160,7 +126,7 @@ module Api
         address = create(:address, :with_lock_script, address_hash: "ckb1qjda0cr08m85hc8jlnfp3zer7xulejywt49kt2rr0vthywaa50xw3vumhs9nvu786dj9p0q5elx66t24n3kxgj53qks")
         query_key = "ckb1qyqt8xaupvm8837nv3gtc9x0ekkj64vud3jqfwyw5v"
         address.query_address = query_key
-        valid_get api_v1_address_url(query_key)
+        valid_get api_v1_suggest_queries_url, params: { q: query_key }
 
         assert_equal AddressSerializer.new(address).serialized_json, response.body
       end
@@ -180,6 +146,20 @@ module Api
         response_json = RequestErrorSerializer.new([error_object], message: error_object.title).serialized_json
 
         valid_get api_v1_suggest_queries_url, params: { q: udt.type_hash }
+
+        assert_equal response_json, response.body
+      end
+
+      test "should return a type_script when query key is a exist script hash" do
+        type_script = create(
+          :type_script,
+          code_hash: Settings.type_id_code_hash,
+          args: "0x8536c9d5d908bd89fc70099e4284870708b6632356aad98734fcf43f6f71c304",
+          script_hash: "0x9bd7e06f3ecf4be0f2fcd2188b23f1b9fcc88e5d4b65a8637b17723bbda3cce8",
+        )
+        response_json = TypeScriptSerializer.new(type_script).serialized_json
+
+        valid_get api_v1_suggest_queries_url, params: { q: type_script.args }
 
         assert_equal response_json, response.body
       end

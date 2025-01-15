@@ -124,4 +124,22 @@ class DailyStatisticSerializer
   } do |object|
     object.liquidity.to_s
   end
+
+  attribute :ckb_hodl_wave, if: Proc.new { |_record, params|
+    params.present? && params[:indicator].include?("ckb_hodl_wave")
+  }
+
+  attribute :holder_count, if: Proc.new { |_record, params|
+    params.present? && params[:indicator].include?("holder_count")
+  } do |object|
+    object.holder_count.to_s
+  end
+
+  attribute :knowledge_size, if: Proc.new { |_record, params|
+    params.present? && params[:indicator].include?("knowledge_size")
+  }
+
+  attribute :activity_address_contract_distribution, if: Proc.new { |_record, params|
+    params.present? && params[:indicator].include?("activity_address_contract_distribution")
+  }
 end

@@ -1,9 +1,13 @@
 ---
 :concurrency: 5
 :queues:
+  - pending_tx
   - critical
   - default
+  - bitcoin
+  - fiber
   - low
+  - rgbpp
 
 production:
   :concurrency: 20

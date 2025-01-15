@@ -4,15 +4,18 @@ module Api
       before_action :validate_query_params, only: :show
 
       def show
-        daily_statistics = DailyStatistic.order(:created_at_unixtimestamp).valid_indicators
+        daily_statistics = DailyStatistic.order(created_at_unixtimestamp: :asc).valid_indicators
 
-        render json: rendered_json(daily_statistics)
+        if stale?(daily_statistics, public: true)
+          render json: rendered_json(daily_statistics)
+        end
       end
 
       private
 
       def rendered_json(daily_statistics)
-        Rails.cache.realize("#{daily_statistics.cache_key}/#{params[:id]}", version: daily_statistics.cache_version, race_condition_ttl: 3.seconds) do
+        Rails.cache.realize("#{daily_statistics.cache_key}/#{params[:id]}", version: daily_statistics.cache_version,
+                                                                            race_condition_ttl: 3.seconds) do
           case params[:id]
           when "avg_hash_rate"
             DailyStatisticSerializer.new(daily_statistics.presence || [], { params: { indicator: params[:id] } })

@@ -3,6 +3,7 @@ require "test_helper"
 module Api
   module V1
     class BlocksControllerTest < ActionDispatch::IntegrationTest
+      BlockKeys = %w(block_hash number transactions_count proposals_count uncles_count uncle_block_hashes reward total_transaction_fee cell_consumed total_cell_capacity miner_hash timestamp difficulty version nonce epoch start_number length transactions_root reward_status received_tx_fee received_tx_fee_status block_index_in_epoch miner_reward miner_message size largest_block largest_block_in_epoch cycles max_cycles_in_epoch max_cycles).sort
       test "should get success code when visit index" do
         valid_get api_v1_blocks_url
 
@@ -47,7 +48,7 @@ module Api
 
       test "should get serialized objects" do
         15.times do |number|
-          create(:block, :with_block_hash, timestamp: 2.days.ago.to_i + number)
+          create(:block, :with_block_hash, timestamp: 2.days.ago.to_i + number, number: number)
         end
         block_timestamps = Block.recent.limit(ENV["HOMEPAGE_BLOCK_RECORDS_COUNT"].to_i).pluck(:timestamp)
         blocks = Block.where(timestamp: block_timestamps).select(:id, :miner_hash, :number, :timestamp, :reward, :ckb_transactions_count, :live_cell_changes).recent
@@ -135,7 +136,7 @@ module Api
 
       test "should return corresponding page's records when page is set and page_size is not set" do
         page = 2
-        create_list(:block, 20, :with_block_hash)
+        create_list(:block, 20, :with_block_number, :with_block_hash)
         block_timestamps = Block.recent.limit(ENV["HOMEPAGE_BLOCK_RECORDS_COUNT"].to_i).pluck(:timestamp)
         blocks = Block.where(timestamp: block_timestamps).select(:id, :miner_hash, :number, :timestamp, :reward, :ckb_transactions_count, :live_cell_changes).recent
 
@@ -148,7 +149,7 @@ module Api
       end
 
       test "should return the corresponding number of blocks when page is not set and page_size is set" do
-        create_list(:block, 20, :with_block_hash)
+        create_list(:block, 20, :with_block_number, :with_block_hash)
 
         valid_get api_v1_blocks_url, params: { page_size: 12 }
 
@@ -160,7 +161,7 @@ module Api
       end
 
       test "should return the corresponding blocks when page and page_size are set" do
-        create_list(:block, 15, :with_block_hash)
+        create_list(:block, 15, :with_block_number, :with_block_hash)
         create(:table_record_count, :block_counter, count: 15)
         page = 2
         page_size = 5
@@ -264,6 +265,7 @@ module Api
       end
 
       test "should return corresponding block with given block hash" do
+        Block.delete_all
         block = create(:block)
 
         valid_get api_v1_block_url(block.block_hash)
@@ -272,6 +274,7 @@ module Api
       end
 
       test "should return corresponding block with given height" do
+        Block.delete_all
         block = create(:block)
 
         valid_get api_v1_block_url(block.number)
@@ -285,7 +288,7 @@ module Api
         valid_get api_v1_block_url(block.block_hash)
 
         response_block = json["data"]
-        assert_equal %w(block_hash number transactions_count proposals_count uncles_count uncle_block_hashes reward total_transaction_fee cell_consumed total_cell_capacity miner_hash timestamp difficulty version nonce epoch start_number length transactions_root reward_status received_tx_fee received_tx_fee_status block_index_in_epoch miner_reward miner_message size).sort, response_block["attributes"].keys.sort
+        assert_equal BlockKeys, response_block["attributes"].keys.sort
       end
 
       test "should return error object when no records found by id" do
@@ -295,6 +298,23 @@ module Api
         valid_get api_v1_block_url("0.87")
 
         assert_equal response_json, response.body
+      end
+
+      test "should get download_csv, by date" do
+
+        block = create :block, timestamp: Time.now.to_i * 1000, miner_hash: 'ckb1qzda0cr08m85hc8jlnfp3zer7xulejywt49kt2rr0vthywaa50xwsqwau7qpcpealv6xf3a37pdcq6ajhwuyaxgs5g955'
+
+        valid_get download_csv_api_v1_blocks_url(start_date: 1.day.ago.to_i * 1000)
+        assert_response :success
+      end
+
+      test "should get download_csv, by block number" do
+
+        block = create :block, timestamp: Time.now.to_i * 1000, miner_hash: 'ckb1qzda0cr08m85hc8jlnfp3zer7xulejywt49kt2rr0vthywaa50xwsqwau7qpcpealv6xf3a37pdcq6ajhwuyaxgs5g955'
+
+        valid_get download_csv_api_v1_blocks_url(start_number: block.number - 1)
+        puts response.body
+        assert_response :success
       end
     end
   end

@@ -1,13 +1,25 @@
 class Address < ApplicationRecord
   PREFIX_MAINNET = "ckb".freeze
   PREFIX_TESTNET = "ckt".freeze
+  MAX_PAGINATES_PER = 1000
+  DEFAULT_PAGINATES_PER = 100
+  paginates_per DEFAULT_PAGINATES_PER
+  max_paginates_per MAX_PAGINATES_PER
 
   has_many :cell_outputs, dependent: :destroy
   has_many :account_books, dependent: :destroy
-  has_many :ckb_transactions, through: :account_books
+  has_many :ckb_transactions, through: :account_books, counter_cache: true
   has_many :mining_infos
   has_many :udt_accounts
-  validates :balance, :cell_consumed, :ckb_transactions_count, :interest, :dao_deposit, numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
+  has_many :dao_events
+  belongs_to :lock_script, optional: true
+  has_many :ckb_dao_transactions, -> { distinct }, through: :dao_events, source: :ckb_transaction
+
+  has_one :bitcoin_address_mapping, foreign_key: "ckb_address_id"
+  has_one :bitcoin_address, through: :bitcoin_address_mapping
+
+  validates :balance, :cell_consumed, :ckb_transactions_count, :interest, :dao_deposit,
+            numericality: { greater_than_or_equal_to: 0 }, allow_nil: true
   validates :lock_hash, presence: true, uniqueness: true
 
   scope :visible, -> { where(visible: true) }
@@ -19,15 +31,12 @@ class Address < ApplicationRecord
   attr_accessor :query_address
 
   def custom_ckb_transactions
-    CkbTransaction.where("contained_address_ids @> array[?]::bigint[]", [id])#.optimizer_hints("indexscan(ckb_transactions index_ckb_transactions_on_contained_address_ids)")
+    ckb_transactions
   end
 
-  def ckb_dao_transactions
-    CkbTransaction.where("dao_address_ids @> array[?]::bigint[]", [id])#.optimizer_hints("indexscan(ckb_transactions index_ckb_transactions_on_dao_address_ids)")
-  end
-
-  def ckb_udt_transactions(udt_id)
-    CkbTransaction.where("udt_address_ids @> array[?]::bigint[]", [id])#.where("contained_udt_ids @> array[?]::bigint[]", [udt_id]).optimizer_hints("indexscan(ckb_transactions index_ckb_transactions_on_contained_udt_ids)")
+  def ckb_udt_transactions(udt)
+    udt = Udt.find_by_id(udt) unless udt.is_a?(Udt)
+    udt&.ckb_transactions || []
   end
 
   def lock_info
@@ -48,74 +57,75 @@ class Address < ApplicationRecord
     addr = CkbUtils.parse_address address_hash
     script = addr.script
     ls = LockScript.find_or_create_by code_hash: script.code_hash, hash_type: script.hash_type, args: script.args
-    ls.update address_id: self.id
-    self.update lock_script_id: ls.id
+    ls.update address_id: id
+    update lock_script_id: ls.id
     ls
   end
 
-
-
-  def self.find_by_address_hash(address_hash, *args, **kargs)
+  def self.find_by_address_hash(address_hash, *_args, **_kargs)
     parsed = CkbUtils.parse_address(address_hash)
     lock_hash = parsed.script.compute_hash
-    find_by lock_hash: lock_hash
+    find_by lock_hash:
   end
 
-  def self.find_or_create_by_address_hash(address_hash, block_timestamp=0)
-    
+  def self.find_or_create_by_address_hash(address_hash, block_timestamp = 0)
     parsed = CkbUtils.parse_address(address_hash)
     lock_hash = parsed.script.compute_hash
     lock_script = LockScript.find_by(
       code_hash: parsed.code_hash,
       hash_type: parsed.hash_type,
-      args: parsed.args
+      args: parsed.args,
     )
 
     create_with(
-      address_hash: CkbUtils.generate_address(parsed.script), 
-      block_timestamp: block_timestamp,
+      address_hash: CkbUtils.generate_address(parsed.script),
+      block_timestamp:,
       lock_script_id: lock_script&.id,
-    ).find_or_create_by lock_hash: lock_hash
+    ).find_or_create_by lock_hash:
   end
 
+  def self.find_or_create_by_lock(lock_script)
+    lock_hash = lock_script.compute_hash
+    address_hash = CkbUtils.generate_address(lock_script)
+    address = Address.find_or_initialize_by(lock_hash:)
+    # force use new version address
+    address.address_hash = address_hash
+    address.lock_script = LockScript
+    address.save!
+    address
+  end
+
+  # @param lock_script [CKB::Types::Script]
+  # @param block_timestamp [Integer]
+  # @param lock_script_id [Integer]
+  # @return [Address]
   def self.find_or_create_address(lock_script, block_timestamp, lock_script_id = nil)
     lock_hash = lock_script.compute_hash
-    address_hash = CkbUtils.generate_address(lock_script, CKB::Address::Version::CKB2019)
-    address_hash_crc = CkbUtils.generate_crc32(address_hash)    
     address_hash_2021 = CkbUtils.generate_address(lock_script, CKB::Address::Version::CKB2021)
-    address_hash_crc_2021 = CkbUtils.generate_crc32(address_hash_2021)    
 
-    unless address = Address.find_by(lock_hash: lock_hash)
-      # first try 2019 version style address hash
-      address = Address.find_by(address_hash_crc: address_hash_crc, address_hash: address_hash)
-
-      # then try 2021 version style address hash
-      address ||= Address.find_by(address_hash_crc: address_hash_crc_2021, address_hash: address_hash_2021)
-
-      # either exists, then create new address
-      address ||= Address.new
-
-      # fill missing lock_hash field
-      address.lock_hash ||= lock_hash
+    address = Address.find_by(lock_hash:)
+    if address.blank?
+      address = Address.new lock_hash:
     end
+
     # force use new version address
     address.address_hash = address_hash_2021
-    address.address_hash_crc = address_hash_crc_2021
     address.block_timestamp ||= block_timestamp
     address.lock_script_id ||= lock_script_id
     if address.balance < 0 || address.balance_occupied < 0 # wrong balance, recalculate balance
-      puts "#{address.address_hash} balance #{address.balance}, #{address.balance_occupied} < 0, resetting"
+      Rails.logger.info "#{address.address_hash} balance #{address.balance}, #{address.balance_occupied} < 0, resetting"
       wrong_balance = address.balance
       address.cal_balance!
-      puts "#{address.address_hash} balance #{address.balance}, #{address.balance_occupied}"
+      Rails.logger.info "#{address.address_hash} balance #{address.balance}, #{address.balance_occupied}"
       Sentry.capture_message(
-        'Reset balance', 
+        "Reset balance",
         extra: {
-          address: address.address_hash, 
-          wrong_balance: wrong_balance,
+          address: address.address_hash,
+          wrong_balance:,
           calced_balance: address.balance,
-          calced_occupied_balance: address.balance_occupied
-        })
+          calced_occupied_balance: address.balance_occupied,
+        },
+      )
     end
     address.save!
     address
@@ -126,19 +136,14 @@ class Address < ApplicationRecord
   end
 
   def self.cached_find(query_key)
-    cache_key = query_key
-    unless QueryKeyUtils.valid_hex?(query_key)
-      cache_key = CkbUtils.parse_address(query_key).script.compute_hash
-    end
     address =
-      Rails.cache.realize([name, cache_key], race_condition_ttl: 3.seconds) do
-        if QueryKeyUtils.valid_hex?(query_key)
-          find_by(lock_hash: query_key)
-        else
-          lock_hash = CkbUtils.parse_address(query_key).script.compute_hash
-          find_by(lock_hash: lock_hash)
-        end
+      if QueryKeyUtils.valid_hex?(query_key)
+        find_by(lock_hash: query_key)
+      else
+        lock_hash = CkbUtils.parse_address(query_key).script.compute_hash
+        find_by(lock_hash:)
       end
+
     unless QueryKeyUtils.valid_hex?(query_key)
       if address.present?
         address.query_address = query_key
@@ -146,13 +151,14 @@ class Address < ApplicationRecord
         address = NullAddress.new(query_key)
       end
     end
+
     address
   end
 
   def cached_lock_script
     if lock_script_id
       Rails.cache.realize([self.class.name, "lock_script", lock_hash], race_condition_ttl: 3.seconds) do
-        lock_script.to_node_lock
+        lock_script.to_node
       end
     else
       addr = CkbUtils.parse_address address_hash
@@ -160,14 +166,14 @@ class Address < ApplicationRecord
       {
         code_hash: script.code_hash,
         args: script.args,
-        hash_type: script.hash_type
+        hash_type: script.hash_type,
       }
     end
   end
 
   def flush_cache
     $redis.pipelined do
-      $redis.del(*cache_keys)
+      Rails.cache.delete_multi(cache_keys)
     end
   end
 
@@ -185,6 +191,16 @@ class Address < ApplicationRecord
 
   def tx_list_cache_key
     "Address/txs/#{id}"
+  end
+
+  def recalc_revalidate_balance!
+    cell_outputs.find_each do |c|
+      if c.status == "dead" and !c.consumed_by
+        c.update  status: "live", consumed_by_id: nil, consumed_block_timestamp: nil
+      end
+    end
+    cal_balance!
+    save!
   end
 
   def cal_balance
@@ -236,28 +252,28 @@ end
 #  id                     :bigint           not null, primary key
 #  balance                :decimal(30, )    default(0)
 #  address_hash           :binary
-#  cell_consumed          :decimal(30, )
-#  ckb_transactions_count :decimal(30, )    default(0)
+#  cell_consumed          :bigint
+#  ckb_transactions_count :bigint           default(0)
 #  created_at             :datetime         not null
 #  updated_at             :datetime         not null
 #  lock_hash              :binary
 #  dao_deposit            :decimal(30, )    default(0)
 #  interest               :decimal(30, )    default(0)
-#  block_timestamp        :decimal(30, )
-#  visible                :boolean          default(TRUE)
-#  live_cells_count       :decimal(30, )    default(0)
+#  block_timestamp        :bigint
+#  live_cells_count       :bigint           default(0)
 #  mined_blocks_count     :integer          default(0)
-#  average_deposit_time   :decimal(, )
+#  visible                :boolean          default(TRUE)
+#  average_deposit_time   :bigint
 #  unclaimed_compensation :decimal(30, )
 #  is_depositor           :boolean          default(FALSE)
-#  dao_transactions_count :decimal(30, )    default(0)
+#  dao_transactions_count :bigint           default(0)
 #  lock_script_id         :bigint
 #  balance_occupied       :decimal(30, )    default(0)
-#  address_hash_crc       :bigint
 #
 # Indexes
 #
-#  index_addresses_on_address_hash_crc  (address_hash_crc)
-#  index_addresses_on_is_depositor      (is_depositor) WHERE (is_depositor = true)
-#  index_addresses_on_lock_hash         (lock_hash) UNIQUE
+#  index_addresses_on_address_hash  (address_hash) USING hash
+#  index_addresses_on_is_depositor  (is_depositor) WHERE (is_depositor = true)
+#  index_addresses_on_lock_hash     (lock_hash) USING hash
+#  unique_lock_hash                 (lock_hash) UNIQUE
 #

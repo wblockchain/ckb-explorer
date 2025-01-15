@@ -168,6 +168,72 @@ module Api
           super code: 1026, status: 404, title: "UDT Not Found", detail: "No UDT records found by given type hash", href: "https://nervosnetwork.github.io/ckb-explorer/public/api_doc.html"
         end
       end
+
+      class ScriptCodeHashParamsInvalidError < Error
+        def initialize
+          super code: 1027, status: 404, title: "URI parameters invalid", detail: "code hash should be start with 0x", href: "https://nervosnetwork.github.io/ckb-explorer/public/api_doc.html"
+        end
+      end
+
+      class ScriptHashTypeParamsInvalidError < Error
+        def initialize
+          super code: 1028, status: 404, title: "URI parameters invalid", detail: "hash type should be 'type'", href: "https://nervosnetwork.github.io/ckb-explorer/public/api_doc.html"
+        end
+      end
+
+      class ScriptNotFoundError < Error
+        def initialize
+          super code: 1029, status: 404, title: "Script not found", detail: "Script not found", href: "https://nervosnetwork.github.io/ckb-explorer/public/api_doc.html"
+        end
+      end
+
+      class UdtInfoInvalidError < Error
+        def initialize(detail)
+          super code: 1030, status: 400, title: "UDT info parameters invalid", detail:, href: "https://nervosnetwork.github.io/ckb-explorer/public/api_doc.html"
+        end
+      end
+
+      class UdtVerificationInvalidError < Error
+        def initialize(detail)
+          super code: 1031, status: 400, title: "UDT verification invalid", detail:, href: "https://nervosnetwork.github.io/ckb-explorer/public/api_doc.html"
+        end
+      end
+
+      class UdtVerificationNotFoundError < Error
+        def initialize
+          super code: 1032, status: 404, title: "UDT Verification Not Found", detail: "No UDT verification records found by given type hash", href: "https://nervosnetwork.github.io/ckb-explorer/public/api_doc.html"
+        end
+      end
+
+      class UdtNoContactEmailError < Error
+        def initialize
+          super code: 1033, status: 400, title: "UDT has no contact email", detail: "", href: "https://nervosnetwork.github.io/ckb-explorer/public/api_doc.html"
+        end
+      end
+
+      class TokenExpiredError < Error
+        def initialize
+          super code: 1034, status: 400, title: "Token has expired", detail: "", href: "https://nervosnetwork.github.io/ckb-explorer/public/api_doc.html"
+        end
+      end
+
+      class TokenNotMatchError < Error
+        def initialize
+          super code: 1035, status: 400, title: "Token is not matched", detail: "", href: "https://nervosnetwork.github.io/ckb-explorer/public/api_doc.html"
+        end
+      end
+
+      class TokenSentTooFrequentlyError < Error
+        def initialize
+          super code: 1036, status: 400, title: "Token sent too frequently", detail: "", href: "https://nervosnetwork.github.io/ckb-explorer/public/api_doc.html"
+        end
+      end
+
+      class TokenNotExistError < Error
+        def initialize
+          super code: 1037, status: 400, title: "Token is required when you update udt info", detail: "", href: "https://nervosnetwork.github.io/ckb-explorer/public/api_doc.html"
+        end
+      end
     end
   end
 end

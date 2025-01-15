@@ -1,0 +1,101 @@
+# special addreses (also check config/settings folder, there are more special addresses defined there)
+special_addresses:
+  short_address: "0x"
+
+# testnet code_hashes
+testnet_issuer_script_code_hash: "0xb59879b6ea6fff985223117fa499ce84f8cfb028c4ffdfdf5d3ec19e905a11ed"
+testnet_token_class_script_code_hash: "0x095b8c0b4e51a45f953acd1fcd1e39489f2675b4bc94e7af27bb38958790e3fc"
+testnet_token_script_code_hash: "0xb1837b5ad01a88558731953062d1f5cb547adf89ece01e8934a9f0aeed2d959f"
+testnet_cota_registry_code_hash: "0x9302db6cc1344b81a5efee06962abcb40427ecfcbe69d471b01b2658ed948075"
+testnet_cota_regular_code_hash: "0x89cd8003a0eaf8e65e0c31525b7d1d5c1becefd2ea75bb4cff87810ae37764d8"
+
+# mainnet code_hashes
+mainnet_issuer_script_code_hash: "0x24b04faf80ded836efc05247778eec4ec02548dab6e2012c0107374aa3f68b81"
+mainnet_token_class_script_code_hash: "0xd51e6eaf48124c601f41abe173f1da550b4cbca9c6a166781906a287abbb3d9a"
+mainnet_token_script_code_hash: "0x2b24f0d644ccbdd77bbf86b27c8cca02efa0ad051e447c212636d9ee7acaaec9"
+mainnet_cota_registry_code_hash: "0x90ca618be6c15f5857d3cbd09f9f24ca6770af047ba9ee70989ec3b229419ac7"
+mainnet_cota_regular_code_hash: "0x1122a4fb54697cf2e6e3a96c9d80fd398a936559b90954c6e88eb7ba0cf652df"
+
+# nrc 721 output data headers
+nrc_721_factory_output_data_header: "0x24ff5a9ab8c38d195ce2b4ea75ca8987"
+nrc_721_token_output_data_header: "0x0ddeff3e8ee03cbf6a2c6920d05c381e"
+
+# spore nft code hash
+spore_cluster1_code_hash: "0x0bbe768b519d8ea7b96d58f1182eb7e6ef96c541fbd9526975077ee09f049058" # tag: v2 preview
+spore_cluster2_code_hash: "0x598d793defef36e2eeba54a9b45130e4ca92822e1d193671f490950c3b856080" # tag: v1 latest
+spore_cell1_code_hash: "0x685a60219309029d01310311dba953d67029170ca4848a4ff638e57002130a0d" # tag: v2 preview
+spore_cell2_code_hash: "0xbbad126377d45f90a8ee120da988a2d7332c78ba8fd679aab478a19d6c133494" # tag: v1 latest
+
+#did cell
+did_cell_code_hash: "0x0b1f412fbae26853ff7d082d422c2bdd9e2ff94ee8aaec11240a5b34cc6e890f"
+
+# omiga inscription info
+omiga_inscription_info_code_hash: "0x50fdea2d0030a8d0b3d69f883b471cab2a29cae6f01923f19cecac0f27fdaaa6"
+omiga_inscription_code_hash: "0x3a241ceceede72a5f55c8fb985652690f09a517d6c9070f0df0d3572fa03fb70"
+# xudt
+xudt_code_hash: "0x25c29dc317811a6f6f3985a7a9ebc4838bd388d19d0feeecf0bcd60f6c0975bb"
+xudt_data_hash: "0x50bd8d6680b8b9cf98b73f3c08faf8b2a21914311954118ad6609be6e78a1b95"
+unique_cell_code_hash: "0x8e341bcfec6393dcd41e635733ff2dca00a6af546949f70c57a706c0f344df8b"
+
+# xudt compatible
+xudt_compatible_code_hash: "0x98701eaf939113606a8a70013fd2e8f27b8f1e234acdc329f3d71f9e9d3d3233"
+xudt_compatible2_code_hash: "0x1142755a044bf2ee358cba9f2da187ce928c91cd4dc8692ded0337efa677d21a"
+xudt_compatible3_code_hash: "0xcc9dc33ef234e14bc788c43a4848556a5fb16401a04662fc55db9bb201987037" # stable coin
+
+# hash length of an attribute(especially which comes from bytea column),
+# e.g. Block.uncle_block_hashes: "0x587f354162afd133b4a4f7a4b621d11e043c3c08b0af2801f1686b5403b14953", which has a length of 66 ( 2 + 64)
+default_hash_length: "64"
+
+# this prefix is '0x'
+default_with_prefix_hash_length: "66"
+
+# short hash length of an attribute,
+# e.g. Block.proposals: ["0xd092cc2023", "0x8844c12abf", "0x0000000000", "0x0000000000"]
+default_short_hash_length: "10"
+
+# prefix string for hash, e.g. 0xa1b2c3d4...
+default_hash_prefix: "0x"
+
+# used to get lock info
+secp_multisig_cell_type_hash: "0x5c5069eb0857efc65e1bca0c07df34c31663b3622fd3876c876320fc9634e2a8"
+
+# used to determine cell type
+dao_code_hash: "0x516be0333273bbe12a723f3be583c524f0b6089326f89c49fc61e24d1f56be21"
+dao_type_hash: "0x82d76d1b75fe2fd9a27dfbaa65a039221a380d76c926f378d3f81cf3e7e13f2e"
+sudt_cell_type_hash: "0x48dbf59b4c7ee1547238021b4869bceedf4eea6b43772e5d66ef8865b6ae7212"
+sudt1_cell_type_hash: "0xc5e5dcf215925f7ef4dfaf5f4b4f105bc321c02776d6e7d52a1db3fcd9d011a4"
+
+# epoch reward
+default_epoch_reward: "1_917_808_21917808"
+
+# code hash for test only. TODO remove it?
+initial_block_reward: "5_000_000_000_000"
+
+# code hash for test only. TODO remove it?
+code_hash: "0x973bdb373cbb1d752b4ac006e2bb5bdcb63431ed2b6e394b22721c8906a2ad72"
+secp_cell_type_hash: "0x9bd7e06f3ecf4be0f2fcd2188b23f1b9fcc88e5d4b65a8637b17723bbda3cce8"
+secp_multisig_cell_code_hash: "0xc1fb0ae6915d3d4eded3498aedf5faddd8c5f6bd8921e0f8bfabd5ebcbf259bc"
+hash_rate_statistical_interval: 900
+average_block_time_interval: 100
+
+# type id code hash
+type_id_code_hash: "0x00000000000000000000000000000000000000000000000000545950455f4944"
+
+homepage_transactions_records_count: 15
+homepage_block_records_count: 15
+proposal_window: 10
+query_default_limit: 5000
+
+# rgbpp code hash
+rgbpp_code_hash:
+  - "0x61ca7a4796a4eb19ca4f0d065cb9b10ddcf002f10f7cbb810c706cb6bb5c3248"
+  - "0xd07598deec7ce7b5665310386b4abd06a6d48843e953c5cc2112ad0d5a220364"
+# btc time code hash
+btc_time_code_hash:
+  - "0x00cdf8fab0f8ac638758ebf5ea5e4052b1d71e8a77b9f43139718621f6849326"
+  - "0x80a09eca26d77cea1f5a69471c59481be7404febf40ee90f886c36a948385b55"
+
+single_use_lock_code_hash: "0x8290467a512e5b9a6b816469b0edabba1f4ac474e28ffdd604c2a7c76446bbaf"
+
+# fiber funding lock code hash
+fiber_funding_code_hash: "0x6c67887fe201ee0c7853f1682c0b77c0e6214044c156c7558269390a8afa6d7c"

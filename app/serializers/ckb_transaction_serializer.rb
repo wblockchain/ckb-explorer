@@ -1,20 +1,26 @@
 # notice:
-# this class would serialize 2 models:  CkbTransaction and PoolTransactionEntry
 #
 class CkbTransactionSerializer
   include FastJsonapi::ObjectSerializer
 
-
   # for the tx_status,
-  # CkbTransaction will always be "commited"
-  # PoolTransactionEntry will give: 0, 1, 2, 3
-  attributes :is_cellbase, :witnesses, :cell_deps, :header_deps, :tx_status
+  attributes :is_cellbase, :tx_status
+
+  attribute :witnesses do |o|
+    o.witnesses.order("index ASC")&.map(&:data) || []
+  end
+
+  attribute :cell_deps do |o|
+    o.cell_dependencies.order("id asc").includes(:cell_output).to_a.map(&:to_raw)
+  end
+
+  attribute :header_deps do |o|
+    o.header_dependencies.map(&:header_hash)
+  end
 
   attribute :detailed_message do |object|
     if object.tx_status.to_s == "rejected"
       object.detailed_message
-    else
-      nil
     end
   end
 
@@ -39,27 +45,27 @@ class CkbTransactionSerializer
   end
 
   attribute :display_inputs do |object, params|
-    if params && params[:previews]
-      if object.display_inputs_info.present?
-        object.display_inputs_info(previews: true)
-      else
+    display_cells = ActiveModel::Type::Boolean.new.cast(params[:display_cells])
+    next [] unless display_cells
+
+    cache_key = "display_inputs_previews_#{params[:previews].present?}_#{object.id}_#{object.inputs.cache_version}"
+    Rails.cache.fetch(cache_key, expires_in: 1.day) do
+      if params && params[:previews]
         object.display_inputs(previews: true)
+      else
+        object.display_inputs
       end
-    else
-      object.display_inputs_info.presence || object.display_inputs
     end
   end
 
   attribute :display_outputs do |object, params|
-    if params && params[:previews]
-      if object.display_inputs_info.present?
-        object.display_outputs_info(previews: true)
-      else
+    display_cells = ActiveModel::Type::Boolean.new.cast(params[:display_cells])
+    next [] unless display_cells
+
+    cache_key = "display_outputs_previews_#{params[:previews].present?}_#{object.id}_#{object.outputs.cache_version}"
+    Rails.cache.fetch(cache_key, expires_in: 1.day) do
+      if params && params[:previews]
         object.display_outputs(previews: true)
-      end
-    else
-      if object.display_inputs_info.present?
-        object.display_outputs_info
       else
         object.display_outputs
       end
@@ -68,15 +74,47 @@ class CkbTransactionSerializer
 
   attribute :income do |object, params|
     if params && params[:previews] && params[:address].present?
-      # if object.tx_display_info.present?
-      #   object.tx_display_info.income[params[:address].address_hash]
-      # else
-        object.income(params[:address])
-      # end
+      object.income(params[:address])
     end
   end
 
   attribute :bytes do |object|
+    UpdateTxBytesWorker.perform_async object.id if object.bytes.blank?
     object.bytes
+  end
+  attribute :largest_tx_in_epoch do |object|
+    object.block&.epoch_statistic&.largest_tx_bytes
+  end
+
+  attribute :largest_tx do
+    EpochStatistic.largest_tx_bytes
+  end
+
+  attribute :cycles do |object|
+    object.cycles
+  end
+
+  attribute :max_cycles_in_epoch do |object|
+    object.block&.epoch_statistic&.max_tx_cycles
+  end
+
+  attribute :max_cycles do
+    EpochStatistic.max_tx_cycles
+  end
+
+  attribute :is_rgb_transaction do |object|
+    object.rgb_transaction?
+  end
+
+  attribute :is_btc_time_lock do |object|
+    object.btc_time_transaction?
+  end
+
+  attribute :rgb_txid do |object|
+    object.rgb_txid
+  end
+
+  attribute :rgb_transfer_step do |object|
+    object.transfer_step
   end
 end

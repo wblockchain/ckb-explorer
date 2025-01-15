@@ -2,35 +2,56 @@ version: '3'
 
 services:
   pg:
-    image: postgres:13-alpine
+    image: postgres:14-alpine
     environment:
       POSTGRES_USER: ckb
       POSTGRES_PASSWORD: nervos
       POSTGRES_DB: explorer
+    ports:
+      - 5432:5432
+
     volumes:
-      - ./data/pg:/var/lib/postgresql/data
+      - pg:/var/lib/postgresql/data
   redis:
     image: redis:bullseye
     user: redis:redis
     volumes:
-      - ./data/redis:/data
-  worker: &rails
-    build: .
+      - redis:/data
+    ports:
+      - 6379:6379
+  memcached:
+    image: memcached
+    ports:
+      - 11211:11211
+  worker:
+    &rails
+    image: ghcr.io/magickbase/ckb-explorer-api:latest
     entrypoint: foreman run
     env_file:
       - .env
     environment:
       DATABASE_URL: postgresql://ckb:nervos@pg/explorer
       REDIS_URL: redis://redis
+      MEMCAHED_URL: memcached://memcached:11211
     depends_on:
-    - redis
-    - pg
+      - redis
+      - pg
+      - memcached
     command: worker
   blocksyncer:
     <<: *rails
-    command: blocksyncer  
-  web: 
+    command: blocksyncer
+  poolsyncer:
+    <<: *rails
+    command: poolsyncer
+  scheduler:
+    <<: *rails
+    command: scheduler
+  web:
     <<: *rails
     command: web
-    ports: 
-      - 3000:3000    
+    ports:
+      - 3000:3000
+volumes:
+  pg:
+  redis:

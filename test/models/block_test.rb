@@ -6,6 +6,12 @@ class BlockTest < ActiveSupport::TestCase
     create(:table_record_count, :ckb_transactions_counter)
     CkbSync::Api.any_instance.stubs(:get_blockchain_info).returns(OpenStruct.new(chain: "ckb_testnet"))
     GenerateStatisticsDataWorker.any_instance.stubs(:perform).returns(true)
+    BitcoinTransactionDetectWorker.any_instance.stubs(:perform).returns(true)
+    CkbSync::Api.any_instance.stubs(:get_block_cycles).returns(
+      [
+        "0x100", "0x200", "0x300", "0x400", "0x500", "0x600", "0x700", "0x800", "0x900"
+      ],
+    )
   end
 
   context "associations" do
@@ -93,7 +99,9 @@ class BlockTest < ActiveSupport::TestCase
     assert_not_empty local_block.ckb_transactions
 
     VCR.use_cassette("blocks/#{DEFAULT_NODE_BLOCK_NUMBER}") do
-      assert_changes -> { CkbTransaction.where(block: local_block).count }, from: local_block.ckb_transactions.count, to: 0 do
+      assert_changes -> {
+                       CkbTransaction.where(block: local_block).count
+                     }, from: local_block.ckb_transactions.count, to: 0 do
         local_block.invalid!
       end
     end
@@ -133,7 +141,9 @@ class BlockTest < ActiveSupport::TestCase
     assert_not_empty origin_lock_scripts
 
     VCR.use_cassette("blocks/#{DEFAULT_NODE_BLOCK_NUMBER}") do
-      assert_changes -> { CellOutput.where(block: local_block).map(&:lock_script).count }, from: origin_lock_scripts.count, to: 0 do
+      assert_changes -> {
+                       CellOutput.where(block: local_block).map(&:lock_script).count
+                     }, from: origin_lock_scripts.count, to: 0 do
         local_block.invalid!
       end
     end
@@ -147,7 +157,9 @@ class BlockTest < ActiveSupport::TestCase
     assert_not_empty origin_type_scripts
 
     VCR.use_cassette("blocks/#{DEFAULT_NODE_BLOCK_NUMBER}") do
-      assert_changes -> { CellOutput.where(block: local_block).map(&:type_script).count }, from: origin_type_scripts.count, to: 0 do
+      assert_changes -> {
+                       CellOutput.where(block: local_block).map(&:type_script).count
+                     }, from: origin_type_scripts.count, to: 0 do
         local_block.invalid!
       end
     end
@@ -203,8 +215,8 @@ class BlockTest < ActiveSupport::TestCase
         compact_target: "0x1000",
         length: "0x07d0",
         number: "0x0",
-        start_number: "0x0"
-      )
+        start_number: "0x0",
+      ),
     )
     VCR.use_cassette("blocks/#{HAS_UNCLES_BLOCK_NUMBER}", record: :new_episodes) do
       node_block = CkbSync::Api.instance.get_block_by_number(HAS_UNCLES_BLOCK_NUMBER)
@@ -213,7 +225,8 @@ class BlockTest < ActiveSupport::TestCase
       block = Block.find_by(number: HAS_UNCLES_BLOCK_NUMBER)
       uncle_block_hashes = block.uncle_block_hashes
 
-      assert_equal unpack_array_attribute(block, "uncle_block_hashes", block.uncles_count, ENV["DEFAULT_HASH_LENGTH"]), uncle_block_hashes
+      assert_equal unpack_array_attribute(block, "uncle_block_hashes", block.uncles_count, Settings.default_hash_length),
+                   uncle_block_hashes
     end
   end
 
@@ -221,7 +234,8 @@ class BlockTest < ActiveSupport::TestCase
     block = create(:block, :with_uncle_block_hashes)
     uncle_block_hashes = block.uncle_block_hashes
 
-    assert_equal unpack_array_attribute(block, "uncle_block_hashes", block.uncles_count, ENV["DEFAULT_HASH_LENGTH"]), uncle_block_hashes
+    assert_equal unpack_array_attribute(block, "uncle_block_hashes", block.uncles_count, Settings.default_hash_length),
+                 uncle_block_hashes
   end
 
   test "#proposals should decodes packed string" do
@@ -230,8 +244,8 @@ class BlockTest < ActiveSupport::TestCase
         compact_target: "0x1000",
         length: "0x07d0",
         number: "0x0",
-        start_number: "0x0"
-      )
+        start_number: "0x0",
+      ),
     )
     VCR.use_cassette("blocks/#{HAS_UNCLES_BLOCK_NUMBER}", record: :new_episodes) do
       node_block = CkbSync::Api.instance.get_block_by_number(HAS_UNCLES_BLOCK_NUMBER)
@@ -241,14 +255,16 @@ class BlockTest < ActiveSupport::TestCase
       block = Block.find_by(number: HAS_UNCLES_BLOCK_NUMBER)
       proposals = block.proposals
 
-      assert_equal unpack_array_attribute(block, "proposals", block.proposals_count, ENV["DEFAULT_SHORT_HASH_LENGTH"]), proposals
+      assert_equal unpack_array_attribute(block, "proposals", block.proposals_count, Settings.default_short_hash_length),
+                   proposals
     end
   end
 
   test "#proposals should return super when proposal transactions is empty" do
     block = create(:block, :with_proposals)
     proposals = block.proposals
-    assert_equal unpack_array_attribute(block, "proposals", block.proposals_count, ENV["DEFAULT_SHORT_HASH_LENGTH"]), proposals
+    assert_equal unpack_array_attribute(block, "proposals", block.proposals_count, Settings.default_short_hash_length),
+                 proposals
   end
 
   test "#proposals= should encode proposals" do
@@ -257,7 +273,46 @@ class BlockTest < ActiveSupport::TestCase
     block.proposals_count = block.proposals.size
     block.save
 
-    assert_equal unpack_array_attribute(block, "proposals", block.proposals_count, ENV["DEFAULT_SHORT_HASH_LENGTH"]), block.proposals
+    assert_equal unpack_array_attribute(block, "proposals", block.proposals_count, Settings.default_short_hash_length),
+                 block.proposals
+  end
+
+  test "it should get last_7_days_ckb_node_version" do
+    result_last_7_days_ckb_node_version = Block.last_7_days_ckb_node_version
+    from = 7.days.ago.to_i * 1000
+    sql = "select ckb_node_version, count(*) from blocks where timestamp >= #{from} group by ckb_node_version;"
+    result_sql = ActiveRecord::Base.connection.execute(sql).values
+
+    assert_equal result_last_7_days_ckb_node_version, result_sql
+  end
+
+  test "it should update_counter_for_ckb_node_version" do
+    block1 = create(:block, block_hash: "001")
+    tx = create(:ckb_transaction, is_cellbase: true, block_id: block1.id,
+                                  witnesses: ["0x640000000c00000055000000490000001000000030000000310000009bd7e06f3ecf4be0f2fcd2188b23f1b9fcc88e5d4b65a8637b17723bbda3cce801140000004a336470564d07ca7059b7980481c2d59809d6370b000000302e3130342e3120282029"])
+
+    block1.update_counter_for_ckb_node_version
+
+    assert_equal GlobalStatistic.find_by(name: "ckb_node_version_0.104.1").value, 1
+  end
+
+  test "it should update the block version" do
+    block2 = create(:block, :with_block_hash)
+    tx = create(:ckb_transaction, is_cellbase: true, block: block2,
+                                  witnesses: ["0x800000000c00000055000000490000001000000030000000310000009bd7e06f3ecf4be0f2fcd2188b23f1b9fcc88e5d4b65a8637b17723bbda3cce80114000000dde7801c073dfb3464c7b1f05b806bb2bbb84e9927000000302e3130332e302028353161383134612d646972747920323032322d30342d3230292000000000"])
+    block3 = create(:block, :with_block_hash)
+    tx = create(:ckb_transaction, is_cellbase: true, block: block3,
+                                  witnesses: ["0x640000000c00000055000000490000001000000030000000310000009bd7e06f3ecf4be0f2fcd2188b23f1b9fcc88e5d4b65a8637b17723bbda3cce801140000004a336470564d07ca7059b7980481c2d59809d6370b000000302e3130342e3120282029"])
+
+    Block.set_ckb_node_versions_from_miner_message
+    assert_equal GlobalStatistic.find_by(name: "ckb_node_version_0.104.1").value, 1
+    assert_equal GlobalStatistic.find_by(name: "ckb_node_version_0.103.0").value, 1
+  end
+
+  test "cached_find not always return nil" do
+    assert_nil Block.cached_find("111111")
+    create(:block, number: 111111)
+    assert_not_nil Block.cached_find("111111")
   end
 
   def node_data_processor

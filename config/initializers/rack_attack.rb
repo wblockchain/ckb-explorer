@@ -23,8 +23,8 @@ class Rack::Attack
   # Throttle all requests by IP (60rpm)
   #
   # Key: "rack::attack:#{Time.now.to_i/:period}:req/ip:#{req.ip}"
-  throttle("req/ip", limit: 1500, period: 5.minutes) do |req|
-    req.env['HTTP_CF_CONNECTING_IP'] || req.ip # unless req.path.start_with?('/assets')
+  throttle("req/ip", limit: 3000, period: 5.minutes) do |req|
+    req.env["HTTP_CF_CONNECTING_IP"] || req.ip # unless req.path.start_with?('/assets')
   end
 
   ### Custom Throttle Response ###
@@ -35,23 +35,26 @@ class Rack::Attack
   # If you want to return 503 so that the attacker might be fooled into
   # believing that they've successfully broken your app (or you just want to
   # customize the response), then uncomment these lines.
-  # self.throttled_response = lambda do |env|
+  # self.throttled_responder = lambda do |env|
   #  [ 503,  # status
   #    {},   # headers
   #    ['']] # body
   # end
   #
-  self.throttled_response =
+  self.throttled_responder =
     lambda do |env|
       match_data = env["rack.attack.match_data"]
-      now = match_data[:epoch_time]
 
-      headers = {
-        "RateLimit-Limit" => match_data[:limit].to_s,
-        "RateLimit-Remaining" => "0",
-        "RateLimit-Reset" => (now + (match_data[:period] - now % match_data[:period])).to_s
-      }
-
-      [429, headers, ["Throttled\n"]]
+      if match_data
+        now = match_data[:epoch_time]
+        headers = {
+          "RateLimit-Limit" => match_data[:limit].to_s,
+          "RateLimit-Remaining" => "0",
+          "RateLimit-Reset" => (now + (match_data[:period] - now % match_data[:period])).to_s,
+        }
+        [429, headers, ["Throttled\n"]]
+      else
+        [429, {}, ["Throttled but no match data\n"]]
+      end
     end
 end

@@ -1,16 +1,52 @@
 module Api
   module V2
     class BaseController < ActionController::API
+      wrap_parameters false
+
       include Pagy::Backend
 
-      protected
+      rescue_from ActiveInteraction::InvalidInteractionError, with: :handle_params_error
+      rescue_from Api::V2::Exceptions::Error, with: :api_error
+
+      def handle_params_error(error)
+        error = Api::V2::Exceptions::ParamsInvalidError.new(error.message.squish.to_s)
+        api_error(error)
+      end
+
+      def api_error(error)
+        render json: RequestErrorSerializer.new([error], message: error.title), status: error.status
+      end
+
       def address_to_lock_hash(address)
-        if address =~ /\A0x/
+        if address.start_with?("0x")
           address
         else
           parsed = CkbUtils.parse_address(address)
           parsed.script.compute_hash
-        end        
+        end
+      end
+
+      # this method is a monkey patch for fast_page using with pagy.
+      def pagy_get_items(collection, pagy)
+        collection.offset(pagy.offset).limit(pagy.items).fast_page
+      end
+
+      attr_reader :current_user
+
+      def validate_jwt!
+        jwt = request.headers["Authorization"]&.split&.last
+        payload = PortfolioUtils.decode_jwt(jwt)
+
+        user = User.find_by(uuid: payload[0]["uuid"])
+        raise Api::V2::Exceptions::UserNotExistError.new("validate jwt") unless user
+
+        @current_user = user
+      rescue JWT::VerificationError => e
+        raise Api::V2::Exceptions::DecodeJWTFailedError.new(e.message)
+      rescue JWT::ExpiredSignature => e
+        raise Api::V2::Exceptions::DecodeJWTFailedError.new(e.message)
+      rescue JWT::DecodeError => e
+        raise Api::V2::Exceptions::DecodeJWTFailedError.new(e.message)
       end
     end
   end

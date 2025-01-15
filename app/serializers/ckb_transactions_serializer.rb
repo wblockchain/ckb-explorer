@@ -15,28 +15,30 @@ class CkbTransactionsSerializer
     object.block_timestamp.to_s
   end
 
+  attribute :display_inputs_count do |object|
+    object.is_cellbase ? 1 : object.cell_inputs.count
+  end
+
+  attribute :display_outputs_count do |object|
+    object.outputs.count
+  end
+
   attribute :display_inputs do |object, params|
-    if params && params[:previews]
-      if object.display_inputs_info.present?
-        object.display_inputs_info(previews: true)
-      else
+    cache_key = "display_inputs_previews_#{params[:previews].present?}_#{object.id}_#{object.inputs.cache_version}"
+    Rails.cache.fetch(cache_key, expires_in: 1.day) do
+      if params && params[:previews]
         object.display_inputs(previews: true)
+      else
+        object.display_inputs
       end
-    else
-      object.display_inputs_info.presence || object.display_inputs
     end
   end
 
   attribute :display_outputs do |object, params|
-    if params && params[:previews]
-      if object.display_inputs_info.present?
-        object.display_outputs_info(previews: true)
-      else
+    cache_key = "display_outputs_previews_#{params[:previews].present?}_#{object.id}_#{object.outputs.cache_version}"
+    Rails.cache.fetch(cache_key, expires_in: 1.day) do
+      if params && params[:previews]
         object.display_outputs(previews: true)
-      end
-    else
-      if object.display_inputs_info.present?
-        object.display_outputs_info
       else
         object.display_outputs
       end
@@ -45,12 +47,31 @@ class CkbTransactionsSerializer
 
   attribute :income do |object, params|
     if params && params[:previews] && params[:address].present?
-      if object.tx_display_info.present?
-        object.tx_display_info.income[params[:address].address_hash]
-      else
-        object.income(params[:address])
-      end
+      object.income(params[:address])
     end
   end
 
+  attribute :is_rgb_transaction do |object|
+    object.rgb_transaction?
+  end
+
+  attribute :is_btc_time_lock do |object|
+    object.btc_time_transaction?
+  end
+
+  attribute :rgb_txid do |object|
+    object.rgb_txid
+  end
+
+  attribute :rgb_transfer_step do |object|
+    object.transfer_step
+  end
+
+  attribute :created_at do |object|
+    object.created_at.to_s
+  end
+
+  attribute :create_timestamp do |object|
+    (object.created_at.to_f * 1000).to_i.to_s
+  end
 end

@@ -1,5 +1,5 @@
 class DaoContract < ApplicationRecord
-  validates :total_deposit, :claimed_compensation, :deposit_transactions_count, :withdraw_transactions_count, :depositors_count, :total_depositors_count, presence: true, numericality: { greater_than_or_equal_to: 0 }
+  validates :total_deposit, :claimed_compensation, :deposit_transactions_count, :withdraw_transactions_count, :depositors_count, presence: true, numericality: { greater_than_or_equal_to: 0 }
   CONTRACT_NAME = "nervos_dao".freeze
   GENESIS_ISSUANCE = 336 * 10**8
   ANNUAL_PRIMARY_ISSUANCE_BASE = GENESIS_ISSUANCE / 8
@@ -14,7 +14,7 @@ class DaoContract < ApplicationRecord
   end
 
   def ckb_transactions
-    CkbTransaction.where("tags @> array[?]::varchar[]", ["dao"])#.optimizer_hints("indexscan(ckb_transactions index_ckb_transactions_on_tags)")
+    CkbTransaction.where("tags @> array[?]::varchar[]", ["dao"]) # .optimizer_hints("indexscan(ckb_transactions index_ckb_transactions_on_tags)")
   end
 
   def estimated_apc(deposit_epoch = tip_block_fraction_epoch, deposited_epochs = EPOCHS_IN_ONE_NATURAL_YEAR)
@@ -84,7 +84,8 @@ class DaoContract < ApplicationRecord
   end
 
   def latest_daily_statistic
-    @latest_daily_statistic ||= DailyStatistic.recent.first || OpenStruct.new(total_dao_deposit: 0, dao_depositors_count: 0, unclaimed_compensation: 0, claimed_compensation: 0, average_deposit_time: 0, mining_reward: 0, deposit_compensation: 0, treasury_amount: 0)
+    @latest_daily_statistic ||= DailyStatistic.recent.first || OpenStruct.new(total_dao_deposit: 0, dao_depositors_count: 0, unclaimed_compensation: 0, claimed_compensation: 0,
+                                                                              average_deposit_time: 0, mining_reward: 0, deposit_compensation: 0, treasury_amount: 0)
   end
 
   def alpha(start_epoch_number)
